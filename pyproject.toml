@@ -20,6 +20,12 @@ classifiers = [
     "Topic :: Utilities",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.1.0",
+]
+
 [project.scripts]
 csv-diff = "csv_diff.cli:main"
 
