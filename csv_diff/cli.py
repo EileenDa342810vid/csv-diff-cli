@@ -1,12 +1,16 @@
-"""Command-line interface for csv-diff-cli."""
+"""Command-line entry point for csv-diff-cli."""
 
-import argparse
+from __future__ import annotations
+
 import sys
+import argparse
+from typing import List, Optional
 
+from csv_diff.reader import read_csv, get_key_column, CSVReadError
 from csv_diff.diff import diff_csv, summarize_diff
-from csv_diff.filter import FilterError, parse_columns
 from csv_diff.formatter import format_diff
-from csv_diff.reader import CSVReadError, get_key_column, read_csv
+from csv_diff.filter import parse_columns, validate_columns, filter_rows, FilterError
+from csv_diff.sorter import parse_sort_key, sort_diff, SortError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -14,71 +18,83 @@ def build_parser() -> argparse.ArgumentParser:
         prog="csv-diff",
         description="Compare two CSV files and show human-readable diffs.",
     )
-    parser.add_argument("old_file", help="Original CSV file")
-    parser.add_argument("new_file", help="New CSV file")
+    parser.add_argument("file_a", help="Original CSV file")
+    parser.add_argument("file_b", help="Modified CSV file")
     parser.add_argument(
         "--key",
         default=None,
-        help="Column to use as the unique row key (default: first column)",
+        help="Column to use as the row identifier (default: first column)",
     )
     parser.add_argument(
         "--delimiter",
         default=",",
-        help="CSV delimiter character (default: ',')",
+        help="CSV field delimiter (default: ',')",
     )
     parser.add_argument(
         "--columns",
         default=None,
-        help="Comma-separated list of columns to compare (default: all)",
+        help="Comma-separated list of columns to compare",
     )
     parser.add_argument(
-        "--no-color",
+        "--sort",
+        default=None,
+        metavar="KEY",
+        help="Sort output by: key, type, or column",
+    )
+    parser.add_argument(
+        "--summary",
         action="store_true",
-        help="Disable ANSI color output",
+        help="Print a summary line instead of full diff",
     )
     return parser
 
 
-def main(argv=None) -> int:
+def main(argv: Optional[List[str]] = None) -> int:  # noqa: C901
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    # --- validate sort key early so we fail fast ---
     try:
-        old_rows, old_headers = read_csv(args.old_file, delimiter=args.delimiter)
-        new_rows, new_headers = read_csv(args.new_file, delimiter=args.delimiter)
-    except CSVReadError as exc:
-        print(f"Error reading CSV: {exc}", file=sys.stderr)
+        sort_key = parse_sort_key(args.sort)
+    except SortError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    key_column = args.key or get_key_column(old_headers)
+    try:
+        rows_a = read_csv(args.file_a, delimiter=args.delimiter)
+        rows_b = read_csv(args.file_b, delimiter=args.delimiter)
+    except CSVReadError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    if not rows_a and not rows_b:
+        return 0
+
+    headers = list(rows_a[0].keys()) if rows_a else list(rows_b[0].keys())
 
     try:
         columns = parse_columns(args.columns)
+        if columns is not None:
+            validate_columns(columns, headers)
+        rows_a = filter_rows(rows_a, columns)
+        rows_b = filter_rows(rows_b, columns)
     except FilterError as exc:
-        print(f"Filter error: {exc}", file=sys.stderr)
+        print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    try:
-        results = diff_csv(old_rows, new_rows, key_column=key_column, columns=columns)
-    except (FilterError, KeyError) as exc:
-        print(f"Diff error: {exc}", file=sys.stderr)
-        return 2
+    key_col = get_key_column(rows_a or rows_b, args.key)
+    changes = diff_csv(rows_a, rows_b, key_column=key_col)
+    changes = sort_diff(changes, sort_key)
 
-    if not results:
-        print("No differences found.")
-        return 0
+    if args.summary:
+        print(summarize_diff(changes))
+    else:
+        output = format_diff(changes, key_column=key_col)
+        if output:
+            print(output)
 
-    output = format_diff(results, use_color=not args.no_color)
-    print(output)
-
-    summary = summarize_diff(results)
-    print(
-        f"\nSummary: {summary['added']} added, "
-        f"{summary['removed']} removed, "
-        f"{summary['modified']} modified."
-    )
-    return 1
+    return 0 if not changes else 1
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())
