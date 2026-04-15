@@ -41,7 +41,15 @@ def diff_csv(
 
     Returns:
         A list of RowAdded, RowRemoved, or RowModified instances.
+
+    Raises:
+        KeyError: If ``key_column`` is not present in any row of either dataset.
     """
+    if old_rows and key_column not in old_rows[0]:
+        raise KeyError(f"key_column {key_column!r} not found in old CSV columns: {list(old_rows[0].keys())}")
+    if new_rows and key_column not in new_rows[0]:
+        raise KeyError(f"key_column {key_column!r} not found in new CSV columns: {list(new_rows[0].keys())}")
+
     old_map: dict[str, dict[str, Any]] = {row[key_column]: row for row in old_rows}
     new_map: dict[str, dict[str, Any]] = {row[key_column]: row for row in new_rows}
 
