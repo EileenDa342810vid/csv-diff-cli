@@ -68,3 +68,31 @@ def get_key_column(headers: List[str], key: Optional[str] = None) -> str:
     if not headers:
         raise CSVReadError("CSV file has no columns.")
     return headers[0]
+
+
+def validate_matching_headers(headers_a: List[str], headers_b: List[str]) -> None:
+    """
+    Warn about column differences between two CSV files.
+
+    Checks that both files share the same set of columns. Columns present in
+    one file but not the other are reported via a CSVReadError so the caller
+    can decide whether to treat the mismatch as fatal.
+
+    Args:
+        headers_a: Column headers from the first CSV file.
+        headers_b: Column headers from the second CSV file.
+
+    Raises:
+        CSVReadError: If the two files have different sets of columns.
+    """
+    set_a = set(headers_a)
+    set_b = set(headers_b)
+    only_in_a = set_a - set_b
+    only_in_b = set_b - set_a
+    if only_in_a or only_in_b:
+        parts = []
+        if only_in_a:
+            parts.append(f"only in first file: {sorted(only_in_a)}")
+        if only_in_b:
+            parts.append(f"only in second file: {sorted(only_in_b)}")
+        raise CSVReadError("Column mismatch between files — " + "; ".join(parts))
