@@ -3,7 +3,8 @@
 import argparse
 import sys
 
-from csv_diff.diff import diff_csv
+from csv_diff.diff import diff_csv, summarize_diff
+from csv_diff.filter import FilterError, parse_columns
 from csv_diff.formatter import format_diff
 from csv_diff.reader import CSVReadError, get_key_column, read_csv
 
@@ -11,59 +12,72 @@ from csv_diff.reader import CSVReadError, get_key_column, read_csv
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="csv-diff",
-        description="Compare two CSV files and display human-readable diffs.",
+        description="Compare two CSV files and show human-readable diffs.",
     )
-    parser.add_argument("file_a", help="Original CSV file")
-    parser.add_argument("file_b", help="Modified CSV file")
+    parser.add_argument("old_file", help="Original CSV file")
+    parser.add_argument("new_file", help="New CSV file")
     parser.add_argument(
-        "-k",
         "--key",
-        metavar="COLUMN",
         default=None,
-        help="Column name to use as the row key (default: first column)",
+        help="Column to use as the unique row key (default: first column)",
     )
     parser.add_argument(
-        "-d",
         "--delimiter",
-        metavar="CHAR",
         default=",",
-        help="Field delimiter character (default: ',')",
+        help="CSV delimiter character (default: ',')",
+    )
+    parser.add_argument(
+        "--columns",
+        default=None,
+        help="Comma-separated list of columns to compare (default: all)",
     )
     parser.add_argument(
         "--no-color",
         action="store_true",
-        default=False,
         help="Disable ANSI color output",
     )
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
     try:
-        rows_a = read_csv(args.file_a, delimiter=args.delimiter)
-        rows_b = read_csv(args.file_b, delimiter=args.delimiter)
+        old_rows, old_headers = read_csv(args.old_file, delimiter=args.delimiter)
+        new_rows, new_headers = read_csv(args.new_file, delimiter=args.delimiter)
     except CSVReadError as exc:
-        print(f"Error reading file: {exc}", file=sys.stderr)
-        return 1
+        print(f"Error reading CSV: {exc}", file=sys.stderr)
+        return 2
+
+    key_column = args.key or get_key_column(old_headers)
 
     try:
-        key_column = get_key_column(rows_a, args.key)
-    except (KeyError, ValueError) as exc:
-        print(f"Error determining key column: {exc}", file=sys.stderr)
-        return 1
+        columns = parse_columns(args.columns)
+    except FilterError as exc:
+        print(f"Filter error: {exc}", file=sys.stderr)
+        return 2
 
-    changes = diff_csv(rows_a, rows_b, key_column=key_column)
-    output = format_diff(changes, use_color=not args.no_color)
+    try:
+        results = diff_csv(old_rows, new_rows, key_column=key_column, columns=columns)
+    except (FilterError, KeyError) as exc:
+        print(f"Diff error: {exc}", file=sys.stderr)
+        return 2
 
-    if output:
-        print(output)
-        return 1  # non-zero exit when differences exist
+    if not results:
+        print("No differences found.")
+        return 0
 
-    print("No differences found.")
-    return 0
+    output = format_diff(results, use_color=not args.no_color)
+    print(output)
+
+    summary = summarize_diff(results)
+    print(
+        f"\nSummary: {summary['added']} added, "
+        f"{summary['removed']} removed, "
+        f"{summary['modified']} modified."
+    )
+    return 1
 
 
 if __name__ == "__main__":

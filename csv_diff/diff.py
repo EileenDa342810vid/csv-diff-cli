@@ -1,57 +1,60 @@
-"""Core diffing logic for comparing two CSV datasets."""
+"""Core diffing logic for CSV files."""
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Optional
+
+from csv_diff.filter import filter_rows, validate_columns
 
 
 @dataclass
 class RowAdded:
     key: str
-    row: dict[str, Any]
+    row: dict
 
 
 @dataclass
 class RowRemoved:
     key: str
-    row: dict[str, Any]
+    row: dict
 
 
 @dataclass
 class RowModified:
     key: str
-    old_row: dict[str, Any]
-    new_row: dict[str, Any]
-    changed_columns: list[str] = field(default_factory=list)
+    old_row: dict
+    new_row: dict
+    changed_fields: list[str] = field(default_factory=list)
 
 
 DiffResult = list[RowAdded | RowRemoved | RowModified]
 
 
 def diff_csv(
-    old_rows: list[dict[str, Any]],
-    new_rows: list[dict[str, Any]],
+    old_rows: list[dict],
+    new_rows: list[dict],
     key_column: str,
+    columns: Optional[list[str]] = None,
 ) -> DiffResult:
-    """Compare two lists of CSV row dicts and return a list of diff events.
+    """Compare two lists of CSV row dicts and return diff events.
 
     Args:
-        old_rows: Rows from the original CSV file.
-        new_rows: Rows from the updated CSV file.
+        old_rows: Rows from the original CSV.
+        new_rows: Rows from the new CSV.
         key_column: Column name used as the unique row identifier.
+        columns: Optional list of columns to restrict comparison to.
 
     Returns:
-        A list of RowAdded, RowRemoved, or RowModified instances.
-
-    Raises:
-        KeyError: If ``key_column`` is not present in any row of either dataset.
+        Ordered list of :class:`RowAdded`, :class:`RowRemoved`, and
+        :class:`RowModified` events.
     """
-    if old_rows and key_column not in old_rows[0]:
-        raise KeyError(f"key_column {key_column!r} not found in old CSV columns: {list(old_rows[0].keys())}")
-    if new_rows and key_column not in new_rows[0]:
-        raise KeyError(f"key_column {key_column!r} not found in new CSV columns: {list(new_rows[0].keys())}")
+    if columns is not None:
+        headers = list(old_rows[0].keys()) if old_rows else list(new_rows[0].keys() if new_rows else [])
+        validate_columns(columns, headers)
+        old_rows = filter_rows(old_rows, columns if key_column in columns else [key_column] + columns)
+        new_rows = filter_rows(new_rows, columns if key_column in columns else [key_column] + columns)
 
-    old_map: dict[str, dict[str, Any]] = {row[key_column]: row for row in old_rows}
-    new_map: dict[str, dict[str, Any]] = {row[key_column]: row for row in new_rows}
+    old_map = {r[key_column]: r for r in old_rows}
+    new_map = {r[key_column]: r for r in new_rows}
 
     results: DiffResult = []
 
@@ -60,19 +63,10 @@ def diff_csv(
             results.append(RowRemoved(key=key, row=old_row))
         else:
             new_row = new_map[key]
-            changed = [
-                col
-                for col in old_row
-                if col in new_row and old_row[col] != new_row[col]
-            ]
+            changed = [f for f in old_row if old_row.get(f) != new_row.get(f)]
             if changed:
                 results.append(
-                    RowModified(
-                        key=key,
-                        old_row=old_row,
-                        new_row=new_row,
-                        changed_columns=changed,
-                    )
+                    RowModified(key=key, old_row=old_row, new_row=new_row, changed_fields=changed)
                 )
 
     for key, new_row in new_map.items():
@@ -82,18 +76,11 @@ def diff_csv(
     return results
 
 
-def summarize_diff(results: DiffResult) -> dict[str, int]:
-    """Return a count summary of each diff event type.
-
-    Args:
-        results: The diff result list returned by :func:`diff_csv`.
-
-    Returns:
-        A dict with keys ``'added'``, ``'removed'``, and ``'modified'``
-        mapping to the respective counts.
-    """
+def summarize_diff(results: DiffResult) -> dict:
+    """Return a summary dict with counts of each change type."""
     return {
         "added": sum(1 for r in results if isinstance(r, RowAdded)),
         "removed": sum(1 for r in results if isinstance(r, RowRemoved)),
         "modified": sum(1 for r in results if isinstance(r, RowModified)),
+        "unchanged": 0,  # placeholder; requires full row set context
     }
