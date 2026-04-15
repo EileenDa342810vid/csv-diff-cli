@@ -1,96 +1,107 @@
 """Command-line entry point for csv-diff-cli."""
-
 from __future__ import annotations
 
-import argparse
 import sys
+import argparse
 
-from csv_diff.reader import read_csv, get_key_column, CSVReadError
+from csv_diff.reader import read_csv, get_key_column, validate_matching_headers, CSVReadError
 from csv_diff.diff import diff_csv
 from csv_diff.formatter import format_diff
 from csv_diff.filter import parse_columns, validate_columns, filter_rows, FilterError
 from csv_diff.sorter import parse_sort_key, sort_diff, SortError
 from csv_diff.stats import compute_stats, format_stats, has_changes
-from csv_diff.pager import should_page, page_output
-from csv_diff.color import _colour_enabled
-from csv_diff.truncate import parse_max_width, TruncateError
+from csv_diff.pager import page_or_print
+from csv_diff.truncate import parse_max_width, truncate_row, TruncateError
+from csv_diff.context import parse_context_lines, add_context, ContextError
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    p = argparse.ArgumentParser(
         prog="csv-diff",
         description="Compare two CSV files and show human-readable diffs.",
     )
-    parser.add_argument("file_a", help="Original CSV file")
-    parser.add_argument("file_b", help="Modified CSV file")
-    parser.add_argument("--key", default=None, help="Column to use as the row key")
-    parser.add_argument("--delimiter", default=",", help="CSV delimiter (default: ,)")
-    parser.add_argument("--columns", default=None, help="Comma-separated list of columns to compare")
-    parser.add_argument("--sort", default=None, choices=["key", "type"], help="Sort diff output")
-    parser.add_argument("--stats", action="store_true", help="Print summary statistics")
-    parser.add_argument("--pager", action="store_true", default=False, help="Force pager")
-    parser.add_argument("--no-pager", action="store_true", default=False, help="Disable pager")
-    parser.add_argument("--color", action="store_true", default=False, help="Force colour output")
-    parser.add_argument("--no-color", action="store_true", default=False, help="Disable colour output")
-    parser.add_argument(
-        "--max-width",
-        default=None,
-        dest="max_width",
-        help="Truncate cell values to this many characters",
-    )
-    return parser
+    p.add_argument("old", help="Original CSV file")
+    p.add_argument("new", help="Updated CSV file")
+    p.add_argument("--key", default=None, help="Column to use as row identifier")
+    p.add_argument("--delimiter", default=",", help="CSV delimiter (default: comma)")
+    p.add_argument("--columns", default=None, help="Comma-separated list of columns to compare")
+    p.add_argument("--sort", default=None, choices=["key", "type"], help="Sort diff output")
+    p.add_argument("--stats", action="store_true", help="Print summary statistics")
+    p.add_argument("--no-color", action="store_true", help="Disable ANSI colour output")
+    p.add_argument("--color", action="store_true", help="Force ANSI colour output")
+    p.add_argument("--max-width", default=None, help="Truncate cell values to this width")
+    p.add_argument("--context", default=None, help="Number of unchanged context rows to show around each change")
+    p.add_argument("--pager", action="store_true", help="Page output through $PAGER")
+    return p
 
 
 def main(argv: list[str] | None = None) -> int:  # noqa: C901
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    # Resolve max-width early so we can emit parser errors.
+    use_color = False if args.no_color else (True if args.color else None)
+
     try:
         max_width = parse_max_width(args.max_width)
     except TruncateError as exc:
         parser.error(str(exc))
 
     try:
-        rows_a = read_csv(args.file_a, delimiter=args.delimiter)
-        rows_b = read_csv(args.file_b, delimiter=args.delimiter)
+        context_n = parse_context_lines(args.context)
+    except ContextError as exc:
+        parser.error(str(exc))
+
+    try:
+        old_rows, old_headers = read_csv(args.old, delimiter=args.delimiter)
+        new_rows, new_headers = read_csv(args.new, delimiter=args.delimiter)
     except CSVReadError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    key = get_key_column(rows_a, args.key)
-
     try:
-        columns = parse_columns(args.columns)
-        if columns is not None:
-            validate_columns(columns, rows_a)
-        rows_a = filter_rows(rows_a, columns)
-        rows_b = filter_rows(rows_b, columns)
-    except FilterError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 2
-
-    diff = diff_csv(rows_a, rows_b, key=key)
-
-    try:
-        sort_key = parse_sort_key(args.sort)
-        diff = sort_diff(diff, sort_key)
-    except SortError as exc:
+        validate_matching_headers(old_headers, new_headers)
+    except CSVReadError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    use_color = _colour_enabled(force=args.color, disable=args.no_color)
-    output = format_diff(diff, color=use_color, max_width=max_width)
+    try:
+        columns = parse_columns(args.columns)
+        if columns:
+            validate_columns(columns, old_headers)
+    except FilterError as exc:
+        parser.error(str(exc))
+
+    key_col = get_key_column(args.key, old_headers)
+
+    if max_width is not None:
+        old_rows = [truncate_row(r, max_width) for r in old_rows]
+        new_rows = [truncate_row(r, max_width) for r in new_rows]
+
+    if columns:
+        old_rows = filter_rows(old_rows, columns, key_col)
+        new_rows = filter_rows(new_rows, columns, key_col)
+
+    diff = diff_csv(old_rows, new_rows, key_col=key_col)
+
+    try:
+        sort_key = parse_sort_key(args.sort)
+        if sort_key:
+            diff = sort_diff(diff, sort_key=sort_key, key_col=key_col)
+    except SortError as exc:
+        parser.error(str(exc))
+
+    output_events = diff
+    if context_n is not None and context_n > 0:
+        output_events = add_context(diff, old_rows, key_col=key_col, n=context_n)
+
+    output = format_diff(output_events, use_color=bool(use_color))
 
     if args.stats:
         stats = compute_stats(diff)
-        output = output + "\n\n" + format_stats(stats)
+        output = (output + "\n\n" + format_stats(stats)).strip()
 
-    use_pager = should_page(force=args.pager, disable=args.no_pager)
-    if use_pager:
-        page_output(output)
-    else:
-        print(output)
+    if output:
+        page_or_print(output, force_pager=args.pager, use_color=bool(use_color))
 
     return 1 if has_changes(diff) else 0
 
