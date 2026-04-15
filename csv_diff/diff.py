@@ -80,3 +80,20 @@ def diff_csv(
             results.append(RowAdded(key=key, row=new_row))
 
     return results
+
+
+def summarize_diff(results: DiffResult) -> dict[str, int]:
+    """Return a count summary of each diff event type.
+
+    Args:
+        results: The diff result list returned by :func:`diff_csv`.
+
+    Returns:
+        A dict with keys ``'added'``, ``'removed'``, and ``'modified'``
+        mapping to the respective counts.
+    """
+    return {
+        "added": sum(1 for r in results if isinstance(r, RowAdded)),
+        "removed": sum(1 for r in results if isinstance(r, RowRemoved)),
+        "modified": sum(1 for r in results if isinstance(r, RowModified)),
+    }
