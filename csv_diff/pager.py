@@ -65,3 +65,22 @@ def page_output(text: str, pager_cmd: Optional[str] = None) -> None:
         proc.wait()
     except OSError as exc:
         raise PagerError(f"Could not launch pager '{cmd}': {exc}") from exc
+
+
+def page_or_print(text: str, force: Optional[bool] = None, pager_cmd: Optional[str] = None) -> None:
+    """Convenience wrapper that combines :func:`should_page` and :func:`page_output`.
+
+    Checks whether paging is appropriate and either pipes *text* through the
+    pager or falls back to a plain ``print``.  Callers that need fine-grained
+    control should call :func:`should_page` and :func:`page_output` directly.
+
+    Args:
+        text: The output text to display.
+        force: When ``True`` always page; when ``False`` never page; when
+            ``None`` (default) the decision is made automatically.
+        pager_cmd: Override the pager command.  Defaults to auto-detection.
+    """
+    if should_page(text, force=force):
+        page_output(text, pager_cmd=pager_cmd)
+    else:
+        print(text)
