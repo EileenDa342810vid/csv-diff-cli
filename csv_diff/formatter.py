@@ -1,56 +1,54 @@
 """Human-readable formatting for CSV diff results."""
 
-from csv_diff.diff import DiffResult, RowAdded, RowModified, RowRemoved
+from __future__ import annotations
 
-ADD_COLOR = "\033[32m"
-REMOVE_COLOR = "\033[31m"
-MODIFY_COLOR = "\033[33m"
-RESET = "\033[0m"
-BOLD = "\033[1m"
+from csv_diff.diff import RowAdded, RowRemoved, RowModified
+from csv_diff.truncate import truncate_row
+from csv_diff.color import added as color_added, removed as color_removed, modified as color_modified
 
 
-def _format_row(row: dict[str, str], prefix: str, color: str, highlight: set[str] | None = None) -> list[str]:
-    lines = []
-    for col, val in row.items():
-        marker = "*" if highlight and col in highlight else " "
-        lines.append(f"{color}{prefix} {marker} {col}: {val}{RESET}")
-    return lines
+def _format_row(row: dict[str, str], prefix: str, color_fn=None) -> str:
+    """Format a single row dict as a prefixed key=value line."""
+    parts = ", ".join(f"{k}={v}" for k, v in row.items())
+    line = f"{prefix} {parts}"
+    if color_fn is not None:
+        line = color_fn(line)
+    return line
 
 
-def format_diff(results: DiffResult, use_color: bool = True) -> str:
-    """Render diff results as a human-readable string.
+def format_diff(
+    diff: list,
+    *,
+    color: bool = False,
+    max_width: int | None = None,
+) -> str:
+    """Render a list of diff events as a human-readable string.
 
-    Args:
-        results: Output from :func:`csv_diff.diff.diff_csv`.
-        use_color: Whether to include ANSI color codes.
-
-    Returns:
-        A formatted multi-line string describing all changes.
+    Parameters
+    ----------
+    diff:
+        List of :class:`RowAdded`, :class:`RowRemoved`, or
+        :class:`RowModified` instances.
+    color:
+        When *True*, ANSI colour codes are applied.
+    max_width:
+        When given, cell values longer than this are truncated with an
+        ellipsis before formatting.
     """
-    if not results:
+    if not diff:
         return "No differences found."
 
-    c_add = ADD_COLOR if use_color else ""
-    c_rem = REMOVE_COLOR if use_color else ""
-    c_mod = MODIFY_COLOR if use_color else ""
-    reset = RESET if use_color else ""
-    bold = BOLD if use_color else ""
-
     lines: list[str] = []
-
-    for event in results:
+    for event in diff:
         if isinstance(event, RowAdded):
-            lines.append(f"{bold}{c_add}+ Added row (key={event.key}){reset}")
-            lines.extend(_format_row(event.row, "+", c_add) if use_color else _format_row(event.row, "+", ""))
+            row = truncate_row(event.row, max_width)
+            lines.append(_format_row(row, "+", color_fn=color_added if color else None))
         elif isinstance(event, RowRemoved):
-            lines.append(f"{bold}{c_rem}- Removed row (key={event.key}){reset}")
-            lines.extend(_format_row(event.row, "-", c_rem) if use_color else _format_row(event.row, "-", ""))
+            row = truncate_row(event.row, max_width)
+            lines.append(_format_row(row, "-", color_fn=color_removed if color else None))
         elif isinstance(event, RowModified):
-            changed_set = set(event.changed_columns)
-            lines.append(f"{bold}{c_mod}~ Modified row (key={event.key}){reset}")
-            lines.append(f"{c_mod}  Changed columns: {', '.join(event.changed_columns)}{reset}")
-            lines.extend(_format_row(event.old_row, "-", c_rem, highlight=changed_set))
-            lines.extend(_format_row(event.new_row, "+", c_add, highlight=changed_set))
-        lines.append("")
-
-    return "\n".join(lines).rstrip()
+            before = truncate_row(event.before, max_width)
+            after = truncate_row(event.after, max_width)
+            lines.append(_format_row(before, "-", color_fn=color_removed if color else None))
+            lines.append(_format_row(after, "+", color_fn=color_added if color else None))
+    return "\n".join(lines)
