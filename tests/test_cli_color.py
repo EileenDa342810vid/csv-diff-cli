@@ -52,3 +52,13 @@ def test_no_color_env_suppresses_ansi(two_csvs, capsys, monkeypatch):
         main([a, b])
     out = capsys.readouterr().out
     assert "\033[" not in out
+
+
+def test_color_flag_overrides_no_color_env(two_csvs, capsys, monkeypatch):
+    """Explicit --color flag should take precedence over the NO_COLOR env var."""
+    monkeypatch.setenv("NO_COLOR", "1")
+    a, b = two_csvs
+    with pytest.raises(SystemExit):
+        main([a, b, "--color"])
+    out = capsys.readouterr().out
+    assert "\033[" in out
