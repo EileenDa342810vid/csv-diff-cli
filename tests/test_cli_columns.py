@@ -66,3 +66,14 @@ def test_no_columns_flag_diffs_all(two_csvs, capsys):
     assert rc == 1
     assert "score" in captured.out
     assert "name" in captured.out
+
+
+def test_columns_multiple_filters(two_csvs, capsys):
+    """Passing multiple --columns values should include changes for each."""
+    old, new = two_csvs
+    rc = main([old, new, "--key", "id", "--columns", "name", "--columns", "score", "--no-color"])
+    captured = capsys.readouterr()
+    assert rc == 1
+    # Both changes should appear when both columns are included
+    assert "Bobby" in captured.out
+    assert "95" in captured.out
