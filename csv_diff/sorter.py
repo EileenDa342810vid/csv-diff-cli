@@ -31,7 +31,10 @@ def parse_sort_key(value: Optional[str]) -> Optional[str]:
 
 
 def _change_type_order(change) -> int:
-    """Return a numeric priority for ordering change types."""
+    """Return a numeric priority for ordering change types.
+
+    Order: added (0) → removed (1) → modified (2) → unknown (3).
+    """
     if isinstance(change, RowAdded):
         return 0
     if isinstance(change, RowRemoved):
@@ -39,6 +42,17 @@ def _change_type_order(change) -> int:
     if isinstance(change, RowModified):
         return 2
     return 3
+
+
+def _first_changed_column(change: RowModified) -> str:
+    """Return the lexicographically first column name that differs in *change*.
+
+    Returns an empty string if ``change.diffs`` is empty, so that such rows
+    sort before rows with no diff information at all.
+    """
+    if change.diffs:
+        return sorted(change.diffs.keys())[0]
+    return ""
 
 
 def sort_diff(changes: List, sort_key: Optional[str]) -> List:
@@ -62,9 +76,8 @@ def sort_diff(changes: List, sort_key: Optional[str]) -> List:
 
     if sort_key == "column":
         def _col_sort(change):
-            if isinstance(change, RowModified) and change.diffs:
-                first_col = sorted(change.diffs.keys())[0]
-                return (0, first_col, str(change.key))
+            if isinstance(change, RowModified):
+                return (0, _first_changed_column(change), str(change.key))
             return (1, "", str(change.key))
 
         return sorted(changes, key=_col_sort)
