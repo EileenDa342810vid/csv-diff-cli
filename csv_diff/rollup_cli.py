@@ -9,6 +9,7 @@ from csv_diff.rollup import RollupError, format_rollup, parse_rollup_column, rol
 
 
 def add_rollup_arguments(parser: ArgumentParser) -> None:
+    """Register --rollup argument on the given argument parser."""
     parser.add_argument(
         "--rollup",
         metavar="COLUMN",
@@ -18,11 +19,17 @@ def add_rollup_arguments(parser: ArgumentParser) -> None:
 
 
 def maybe_print_rollup(args: Namespace, events: list, headers: List[str]) -> bool:
+    """Compute and print rollup totals if --rollup was requested.
+
+    Returns True if a rollup was printed, False if --rollup was not specified.
+    Exits with code 2 on any error (unknown column, non-numeric values, etc.).
+    """
     column = parse_rollup_column(getattr(args, "rollup", None))
     if column is None:
         return False
     if column not in headers:
         print(f"error: rollup column '{column}' not found in headers", file=sys.stderr)
+        print(f"  available columns: {', '.join(headers)}", file=sys.stderr)
         sys.exit(2)
     try:
         rollup = rollup_diff(events, column)
