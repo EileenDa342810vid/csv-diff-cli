@@ -60,6 +60,15 @@ def test_split_raises_on_unknown_event():
         split_diff([object()])
 
 
+def test_split_error_message_contains_type():
+    """SplitError should mention the unexpected type to aid debugging."""
+    class Unexpected:
+        pass
+
+    with pytest.raises(SplitError, match="Unexpected"):
+        split_diff([Unexpected()])
+
+
 def test_format_split_contains_headers():
     r = split_diff([_added(), _modified()])
     out = format_split(r)
