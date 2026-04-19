@@ -91,3 +91,13 @@ def test_no_color_flag_does_not_crash(tmp_files, capsys):
     assert result == 0
     captured = capsys.readouterr()
     assert "No differences found." in captured.out
+
+
+def test_removed_row_exits_one(tmp_files):
+    """A row present in file A but absent in file B should be reported as removed."""
+    a, b = make_files(
+        [{"id": "1", "name": "Alice"}, {"id": "2", "name": "Bob"}],
+        [{"id": "1", "name": "Alice"}],
+        tmp_files,
+    )
+    assert main([a, b]) == 1
