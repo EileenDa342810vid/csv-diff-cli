@@ -21,6 +21,11 @@ class CheckpointMeta:
     removed: int
     modified: int
 
+    @property
+    def total(self) -> int:
+        """Total number of changes across all event types."""
+        return self.added + self.removed + self.modified
+
 
 def parse_checkpoint_name(value: Optional[str]) -> Optional[str]:
     if not value or not value.strip():
@@ -86,5 +91,6 @@ def format_checkpoint(meta: CheckpointMeta) -> str:
         f"Checkpoint '{meta.name}'\n"
         f"  added:    {meta.added}\n"
         f"  removed:  {meta.removed}\n"
-        f"  modified: {meta.modified}"
+        f"  modified: {meta.modified}\n"
+        f"  total:    {meta.total}"
     )
